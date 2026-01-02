@@ -18,6 +18,9 @@ var tradeGiveForSnippet = "for:";
 var stoleFromYouSnippet = "stole:";
 var stoleFromSnippet = " stole  from: "; // extra space from icon
 
+var PERSISTENCE_PREFIX = "explorer_state_";
+var persistTimer = null;
+
 var wood = "wood";
 var stone = "stone";
 var wheat = "wheat";
@@ -166,6 +169,70 @@ function renderPlayerCell(player) {
     `;
 }
 
+function getFingerprintId() {
+    var hash = window.location.hash || "";
+    if (!hash) {
+        return null;
+    }
+    return hash.replace(/^#/, "");
+}
+
+function getPersistenceKey() {
+    var fingerprint = getFingerprintId();
+    if (!fingerprint) {
+        return null;
+    }
+    return `${PERSISTENCE_PREFIX}${fingerprint}`;
+}
+
+function savePersistedState() {
+    var key = getPersistenceKey();
+    if (!key) {
+        return;
+    }
+    var payload = {
+        players,
+        player_colors,
+        resources,
+        thefts,
+        solved_thefts,
+    };
+    localStorage.setItem(key, JSON.stringify(payload));
+}
+
+function schedulePersistedState() {
+    if (persistTimer) {
+        clearTimeout(persistTimer);
+    }
+    persistTimer = setTimeout(() => {
+        persistTimer = null;
+        savePersistedState();
+    }, 250);
+}
+
+function loadPersistedState() {
+    var key = getPersistenceKey();
+    if (!key) {
+        return false;
+    }
+    var raw = localStorage.getItem(key);
+    if (!raw) {
+        return false;
+    }
+    try {
+        var payload = JSON.parse(raw);
+        players = payload.players || [];
+        player_colors = payload.player_colors || {};
+        resources = payload.resources || {};
+        thefts = payload.thefts || [];
+        solved_thefts = payload.solved_thefts || [];
+        return true;
+    } catch (e) {
+        console.warn("Failed to parse persisted state", e);
+        return false;
+    }
+}
+
 /**
 * Renders the table with the counts.
 */
@@ -223,6 +290,7 @@ function render() {
     body.appendChild(tbl);
     // tbl border attribute to 
     tbl.setAttribute("border", "2");
+    schedulePersistedState();
 }
 
 /**
@@ -692,7 +760,14 @@ function findTranscription() {
         if (logElement) {
             console.log("Logs loaded...");
             clearInterval(interval);
-            waitForInitialPlacement();
+            if (loadPersistedState()) {
+                MSG_OFFSET = getAllMessages().length;
+                render();
+                deleteDiscordSigns();
+                startWatchingMessages();
+            } else {
+                waitForInitialPlacement();
+            }
         } else {
             logElement = document.getElementById("game-log-text");
         }
