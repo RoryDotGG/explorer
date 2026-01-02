@@ -70,3 +70,55 @@
     width: 24px;
     height: 36px;
 }
+
+#explorer-hints {
+    position: absolute;
+    background-color: white;
+    z-index: 9999;
+    top: 10px;
+    right: 10px;
+    padding: 6px 8px;
+    border: 1px solid #dddddd;
+    min-width: 220px;
+}
+
+.explorer-hints-title {
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 85%;
+    margin-bottom: 6px;
+}
+
+.explorer-hints-row {
+    display: flex;
+    align-items: flex-start;
+    margin-bottom: 6px;
+}
+
+.explorer-hints-row:last-child {
+    margin-bottom: 0;
+}
+
+.explorer-hints-player {
+    display: inline-flex;
+    align-items: center;
+    margin-right: 8px;
+    min-width: 90px;
+}
+
+.explorer-hints-player-color {
+    width: 6px;
+    height: 16px;
+    background-color: #000;
+    display: inline-block;
+}
+
+.explorer-hints-player-name {
+    margin-left: 4px;
+    font-weight: 600;
+}
+
+.explorer-hints-text {
+    font-size: 90%;
+    line-height: 1.2em;
+}

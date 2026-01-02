@@ -21,6 +21,9 @@ var stoleFromSnippet = " stole  from: "; // extra space from icon
 var PERSISTENCE_PREFIX = "explorer_state_";
 var persistTimer = null;
 
+var HINTS_ENABLED = true;
+var HAND_RISK_THRESHOLD = 7;
+
 var wood = "wood";
 var stone = "stone";
 var wheat = "wheat";
@@ -76,6 +79,66 @@ function calculateTheftForPlayerAndResource(player, resourceType) {
         }
         return 0;
     }).reduce((a, b) => a + b, 0);
+}
+
+function getUnknownTheftSummary(player) {
+    var summary = {
+        pending: 0,
+        netDelta: 0,
+        minResources: {},
+    };
+    for (var resourceType of resourceTypes) {
+        summary.minResources[resourceType] = resources[player][resourceType];
+    }
+    for (var i = 0; i < thefts.length; i++) {
+        var theft = thefts[i];
+        if (theft.who.targetPlayer === player) {
+            summary.pending += 1;
+            summary.netDelta -= 1;
+            for (var resourceType in theft.what) {
+                summary.minResources[resourceType] -= 1;
+            }
+        }
+        if (theft.who.stealingPlayer === player) {
+            summary.pending += 1;
+            summary.netDelta += 1;
+        }
+    }
+    return summary;
+}
+
+function getPlayerHandEstimate(player, netDelta) {
+    var total = 0;
+    for (var resourceType of resourceTypes) {
+        total += resources[player][resourceType];
+    }
+    return total + netDelta;
+}
+
+function canAffordWithMinimums(minResources, costs) {
+    for (var resourceType in costs) {
+        if ((minResources[resourceType] || 0) < costs[resourceType]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+function getBuildOptions(minResources) {
+    var options = [];
+    if (canAffordWithMinimums(minResources, { [wood]: 1, [brick]: 1 })) {
+        options.push("road");
+    }
+    if (canAffordWithMinimums(minResources, { [wood]: 1, [brick]: 1, [sheep]: 1, [wheat]: 1 })) {
+        options.push("settlement");
+    }
+    if (canAffordWithMinimums(minResources, { [stone]: 3, [wheat]: 2 })) {
+        options.push("city");
+    }
+    if (canAffordWithMinimums(minResources, { [sheep]: 1, [wheat]: 1, [stone]: 1 })) {
+        options.push("dev");
+    }
+    return options;
 }
 
 function getResourceImg(resourceType) {
@@ -167,6 +230,73 @@ function renderPlayerCell(player) {
         <div class="explorer-tbl-player-col-cell-color" style="background-color:${player_colors[player]}"></div>
         <span class="explorer-tbl-player-name" style="color:${player_colors[player]}">${player}</span>
     `;
+}
+
+function renderHintsPanel() {
+    var existingHints = document.getElementById("explorer-hints");
+    if (existingHints) {
+        existingHints.remove();
+    }
+    if (!HINTS_ENABLED) {
+        return;
+    }
+    var body = document.getElementsByTagName("body")[0];
+    var container = document.createElement("div");
+    container.id = "explorer-hints";
+
+    var title = document.createElement("div");
+    title.className = "explorer-hints-title";
+    title.textContent = "Hints";
+    container.appendChild(title);
+
+    for (var i = 0; i < players.length; i++) {
+        var player = players[i];
+        if (!resources[player]) {
+            continue;
+        }
+        var summary = getUnknownTheftSummary(player);
+        var buildOptions = getBuildOptions(summary.minResources);
+        var handEstimate = getPlayerHandEstimate(player, summary.netDelta);
+        var hints = [];
+
+        if (buildOptions.length) {
+            hints.push("Can build now: " + buildOptions.join(", "));
+        }
+        if (handEstimate >= HAND_RISK_THRESHOLD) {
+            hints.push("Hand size risk: 7+ (est. " + handEstimate + ")");
+        }
+        if (summary.pending > 0) {
+            hints.push("Unknown thefts pending: " + summary.pending);
+        }
+        if (!hints.length) {
+            hints.push("No immediate hints");
+        }
+
+        var row = document.createElement("div");
+        row.className = "explorer-hints-row";
+
+        var playerCol = document.createElement("div");
+        playerCol.className = "explorer-hints-player";
+        var playerColor = document.createElement("div");
+        playerColor.className = "explorer-hints-player-color";
+        playerColor.style.backgroundColor = player_colors[player];
+        var playerName = document.createElement("span");
+        playerName.className = "explorer-hints-player-name";
+        playerName.style.color = player_colors[player];
+        playerName.textContent = player;
+        playerCol.appendChild(playerColor);
+        playerCol.appendChild(playerName);
+
+        var hintText = document.createElement("div");
+        hintText.className = "explorer-hints-text";
+        hintText.textContent = hints.join(" | ");
+
+        row.appendChild(playerCol);
+        row.appendChild(hintText);
+        container.appendChild(row);
+    }
+
+    body.appendChild(container);
 }
 
 function getFingerprintId() {
@@ -290,6 +420,7 @@ function render() {
     body.appendChild(tbl);
     // tbl border attribute to 
     tbl.setAttribute("border", "2");
+    renderHintsPanel();
     schedulePersistedState();
 }
 
@@ -775,4 +906,26 @@ function findTranscription() {
 }
 
 
-findTranscription();
+function shouldAutoStart() {
+    return typeof window !== "undefined" && typeof document !== "undefined";
+}
+
+if (shouldAutoStart()) {
+    findTranscription();
+}
+
+if (typeof module !== "undefined" && module.exports) {
+    module.exports = {
+        calculateTheftForPlayerAndResource,
+        canAffordWithMinimums,
+        getBuildOptions,
+        getResourceTypeFromImgSrc,
+        parseStolenPlayers,
+        _state: {
+            resources,
+            thefts,
+            players,
+            resourceTypes,
+        },
+    };
+}
