@@ -1,0 +1,8 @@
+{
+    "name": "explorer-extension",
+    "private": true,
+    "scripts": {
+        "test": "node --test",
+        "build": "./compress.sh"
+    }
+}
