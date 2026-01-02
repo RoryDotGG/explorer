@@ -44,16 +44,16 @@ var solved_thefts = [];
 // First, delete the discord signs
 function deleteDiscordSigns() {
     var allPageImages = document.getElementsByTagName('img'); 
-    for(var i = 0; i < allPageImages.length; i++) {
+    for (var i = 0; i < allPageImages.length; i++) {
         if (allPageImages[i].src.includes("discord")) {
             allPageImages[i].remove();
         }
     }
-    ad_left = document.getElementById("in-game-ad-left");
+    var ad_left = document.getElementById("in-game-ad-left");
     if (ad_left) {
         ad_left.remove();
     }
-    ad_right = document.getElementById("in-game-ad-right");
+    var ad_right = document.getElementById("in-game-ad-right");
     if (ad_right) {
         ad_right.remove();
     }
@@ -98,6 +98,67 @@ function getResourceImg(resourceType) {
     return `<img src="https://colonist.io/dist/images/${img_name}.svg" class="explorer-tbl-resource-icon" />`
 }
 
+function getResourceTypeFromImgSrc(src) {
+    if (src.includes("card_wool")) {
+        return sheep;
+    }
+    if (src.includes("card_lumber")) {
+        return wood;
+    }
+    if (src.includes("card_brick")) {
+        return brick;
+    }
+    if (src.includes("card_ore")) {
+        return stone;
+    }
+    if (src.includes("card_grain")) {
+        return wheat;
+    }
+    return null;
+}
+
+function applyResourceDelta(player, resourceType, delta) {
+    if (!resourceType) {
+        return;
+    }
+    resources[player][resourceType] += delta;
+}
+
+function applyResourceDeltaFromImg(player, img, delta) {
+    applyResourceDelta(player, getResourceTypeFromImgSrc(img.src), delta);
+}
+
+function applyResourceDeltasFromHtml(player, htmlSegment, delta) {
+    var imgChunks = htmlSegment.split("<img");
+    for (var i = 0; i < imgChunks.length; i++) {
+        applyResourceDelta(player, getResourceTypeFromImgSrc(imgChunks[i]), delta);
+    }
+}
+
+function transferResourcesFromHtml(srcPlayer, destPlayer, htmlSegment) {
+    var imgChunks = htmlSegment.split("<img");
+    for (var i = 0; i < imgChunks.length; i++) {
+        var resourceType = getResourceTypeFromImgSrc(imgChunks[i]);
+        if (resourceType) {
+            transferResource(srcPlayer, destPlayer, resourceType);
+        }
+    }
+}
+
+function parseStolenPlayers(prevElement) {
+    if (!prevElement) {
+        return null;
+    }
+    var parts = prevElement.textContent.replace(stoleFromSnippet, " ").split(" ").filter(Boolean);
+    if (parts.length < 2) {
+        return null;
+    }
+    return {
+        stealingPlayer: parts[0],
+        targetPlayer: parts[1],
+    };
+}
+
 function renderPlayerCell(player) {
     return `
         <div class="explorer-tbl-player-col-cell-color" style="background-color:${player_colors[player]}"></div>
@@ -105,31 +166,17 @@ function renderPlayerCell(player) {
     `;
 }
 
-var render_cache = null;
-function shouldRenderTable(...deps) {
-    if (JSON.stringify(deps) === render_cache) {
-        return false;
-    }
-    render_cache = JSON.stringify(deps);
-    console.log("Will render...");
-    return true;
-}
-
 /**
 * Renders the table with the counts.
 */
 function render() {
-    if (!shouldRenderTable(resources, thefts)) {
-        return;
-    }
-
     var existingTbl = document.getElementById("explorer-tbl");
     try {
         if (existingTbl) {
             existingTbl.remove();
         }
     } catch (e) {
-        console.warning("had an issue deleting the table", e);
+        console.warn("had an issue deleting the table", e);
     }
     var body = document.getElementsByTagName("body")[0];
     var tbl = document.createElement("table");
@@ -193,17 +240,7 @@ function parseGotMessage(pElement) {
     }
     var images = collectionToArray(pElement.getElementsByTagName('img'));
     for (var img of images) {
-        if (img.src.includes("card_wool")) {
-            resources[player][sheep] += 1;
-        } else if (img.src.includes("card_lumber")) {
-            resources[player][wood] += 1;
-        } else if (img.src.includes("card_brick")) {
-            resources[player][brick] += 1;
-        } else if (img.src.includes("card_ore")) {
-            resources[player][stone] += 1; 
-        } else if (img.src.includes("card_grain")) {
-            resources[player][wheat] += 1;
-        }
+        applyResourceDeltaFromImg(player, img, 1);
     }
 }
 
@@ -275,34 +312,15 @@ function parseTradeBankMessage(pElement) {
     }
     // We have to split on the text, which isn't wrapped in tags, so we parse innerHTML, which prints the HTML and the text.
     var innerHTML = pElement.innerHTML;
-    var gavebank = innerHTML.slice(innerHTML.indexOf(tradeBankGaveSnippet), innerHTML.indexOf(tradeBankTookSnippet)).split("<img");
-    var andtook = innerHTML.slice(innerHTML.indexOf(tradeBankTookSnippet)).split("<img");
-    for (var imgStr of gavebank) {
-        if (imgStr.includes("card_wool")) {
-            resources[player][sheep] -= 1;
-        } else if (imgStr.includes("card_lumber")) {
-            resources[player][wood] -= 1;
-        } else if (imgStr.includes("card_brick")) {
-            resources[player][brick] -= 1;
-        } else if (imgStr.includes("card_ore")) {
-            resources[player][stone] -= 1; 
-        } else if (imgStr.includes("card_grain")) {
-            resources[player][wheat] -= 1;
-        }
+    var gaveStart = innerHTML.indexOf(tradeBankGaveSnippet);
+    var tookStart = innerHTML.indexOf(tradeBankTookSnippet);
+    if (gaveStart === -1 || tookStart === -1) {
+        return;
     }
-    for (var imgStr of andtook) {
-        if (imgStr.includes("card_wool")) {
-            resources[player][sheep] += 1;
-        } else if (imgStr.includes("card_lumber")) {
-            resources[player][wood] += 1;
-        } else if (imgStr.includes("card_brick")) {
-            resources[player][brick] += 1;
-        } else if (imgStr.includes("card_ore")) {
-            resources[player][stone] += 1; 
-        } else if (imgStr.includes("card_grain")) {
-            resources[player][wheat] += 1;
-        }
-    }
+    var gaveSegment = innerHTML.slice(gaveStart, tookStart);
+    var tookSegment = innerHTML.slice(tookStart);
+    applyResourceDeltasFromHtml(player, gaveSegment, -1);
+    applyResourceDeltasFromHtml(player, tookSegment, 1);
 }
 
 function stealAllOfResource(receivingPlayer, resource) {
@@ -330,16 +348,9 @@ function parseStoleAllOfMessage(pElement) {
     var images = collectionToArray(pElement.getElementsByTagName('img'));
     // there will only be 1 resource icon
     for (var img of images) {
-        if (img.src.includes("card_wool")) {
-            stealAllOfResource(player, sheep);
-        } else if (img.src.includes("card_lumber")) {
-            stealAllOfResource(player, wood);
-        } else if (img.src.includes("card_brick")) {
-            stealAllOfResource(player, brick);
-        } else if (img.src.includes("card_ore")) {
-            stealAllOfResource(player, stone);
-        } else if (img.src.includes("card_grain")) {
-            stealAllOfResource(player, wheat);
+        var resourceType = getResourceTypeFromImgSrc(img.src);
+        if (resourceType) {
+            stealAllOfResource(player, resourceType);
         }
     }
 }
@@ -352,24 +363,14 @@ function parseDiscardedMessage(pElement) {
     if (!textContent.includes(discardedSnippet)) {
         return;
     }
-    var player = textContent.replace(receivedResourcesSnippet, "").split(" ")[0];
+    var player = textContent.split(" ")[0];
     if (!resources[player]) {
         console.log("Failed to parse player...", player, resources);
         return;
     }
     var images = collectionToArray(pElement.getElementsByTagName('img'));
     for (var img of images) {
-        if (img.src.includes("card_wool")) {
-            resources[player][sheep] -= 1;
-        } else if (img.src.includes("card_lumber")) {
-            resources[player][wood] -= 1;
-        } else if (img.src.includes("card_brick")) {
-            resources[player][brick] -= 1;
-        } else if (img.src.includes("card_ore")) {
-            resources[player][stone] -= 1; 
-        } else if (img.src.includes("card_grain")) {
-            resources[player][wheat] -= 1;
-        }
+        applyResourceDeltaFromImg(player, img, -1);
     }
 }
 
@@ -387,6 +388,9 @@ function parseTradedMessage(pElement, prevElement) {
     if (!textContent.includes(tradedWithSnippet)) {
         return;
     }
+    if (!prevElement) {
+        return;
+    }
     var tradingPlayer = textContent.split(tradedWithSnippet)[0];
     var agreeingPlayer = textContent.split(tradedWithSnippet)[1];
     if (!resources[tradingPlayer] || !resources[agreeingPlayer]) {
@@ -395,34 +399,15 @@ function parseTradedMessage(pElement, prevElement) {
     }
     // We have to split on the text, which isn't wrapped in tags, so we parse innerHTML, which prints the HTML and the text.
     var innerHTML = prevElement.innerHTML; // on the trade description msg
-    var wantstogive = innerHTML.slice(innerHTML.indexOf(tradeWantsToGiveSnippet), innerHTML.indexOf(tradeGiveForSnippet)).split("<img");
-    var givefor = innerHTML.slice(innerHTML.indexOf(tradeGiveForSnippet)).split("<img");
-    for (var imgStr of wantstogive) {
-        if (imgStr.includes("card_wool")) {
-            transferResource(tradingPlayer, agreeingPlayer, sheep);
-        } else if (imgStr.includes("card_lumber")) {
-            transferResource(tradingPlayer, agreeingPlayer, wood);
-        } else if (imgStr.includes("card_brick")) {
-            transferResource(tradingPlayer, agreeingPlayer, brick);
-        } else if (imgStr.includes("card_ore")) {
-            transferResource(tradingPlayer, agreeingPlayer, stone);
-        } else if (imgStr.includes("card_grain")) {
-            transferResource(tradingPlayer, agreeingPlayer, wheat);
-        }
+    var wantsStart = innerHTML.indexOf(tradeWantsToGiveSnippet);
+    var giveForStart = innerHTML.indexOf(tradeGiveForSnippet);
+    if (wantsStart === -1 || giveForStart === -1) {
+        return;
     }
-    for (var imgStr of givefor) {
-        if (imgStr.includes("card_wool")) {
-            transferResource(agreeingPlayer, tradingPlayer, sheep);
-        } else if (imgStr.includes("card_lumber")) {
-            transferResource(agreeingPlayer, tradingPlayer, wood);
-        } else if (imgStr.includes("card_brick")) {
-            transferResource(agreeingPlayer, tradingPlayer, brick);
-        } else if (imgStr.includes("card_ore")) {
-            transferResource(agreeingPlayer, tradingPlayer, stone);
-        } else if (imgStr.includes("card_grain")) {
-            transferResource(agreeingPlayer, tradingPlayer, wheat);
-        }
-    }
+    var wantsSegment = innerHTML.slice(wantsStart, giveForStart);
+    var giveForSegment = innerHTML.slice(giveForStart);
+    transferResourcesFromHtml(tradingPlayer, agreeingPlayer, wantsSegment);
+    transferResourcesFromHtml(agreeingPlayer, tradingPlayer, giveForSegment);
 }
 
 /**
@@ -434,25 +419,21 @@ function parseStoleFromYouMessage(pElement, prevElement) {
     if (!textContent.includes(stoleFromYouSnippet)) {
         return;
     }
-    var involvedPlayers = prevElement.textContent.replace(stoleFromSnippet, " ").split(" ");
-    var stealingPlayer = involvedPlayers[0];
-    var targetPlayer = involvedPlayers[1];
+    var parsedPlayers = parseStolenPlayers(prevElement);
+    if (!parsedPlayers) {
+        return;
+    }
+    var stealingPlayer = parsedPlayers.stealingPlayer;
+    var targetPlayer = parsedPlayers.targetPlayer;
     if (!resources[stealingPlayer] || !resources[targetPlayer]) {
         console.log("Failed to parse player...", stealingPlayer, targetPlayer, resources);
         return;
     }
     var images = collectionToArray(pElement.getElementsByTagName('img'));
     for (var img of images) {
-        if (img.src.includes("card_wool")) {
-            transferResource(targetPlayer, stealingPlayer, sheep);
-        } else if (img.src.includes("card_lumber")) {
-            transferResource(targetPlayer, stealingPlayer, wood);
-        } else if (img.src.includes("card_brick")) {
-            transferResource(targetPlayer, stealingPlayer, brick);
-        } else if (img.src.includes("card_ore")) {
-            transferResource(targetPlayer, stealingPlayer, stone);
-        } else if (img.src.includes("card_grain")) {
-            transferResource(targetPlayer, stealingPlayer, wheat);
+        var resourceType = getResourceTypeFromImgSrc(img.src);
+        if (resourceType) {
+            transferResource(targetPlayer, stealingPlayer, resourceType);
         }
     }
 }
@@ -472,9 +453,12 @@ function parseStoleUnknownMessage(pElement, prevElement) {
         return;
     }
     // figure out the 2 players
-    var involvedPlayers = prevElement.textContent.replace(stoleFromSnippet, " ").split(" ");
-    var stealingPlayer = involvedPlayers[0];
-    var targetPlayer = involvedPlayers[1];
+    var parsedPlayers = parseStolenPlayers(prevElement);
+    if (!parsedPlayers) {
+        return;
+    }
+    var stealingPlayer = parsedPlayers.stealingPlayer;
+    var targetPlayer = parsedPlayers.targetPlayer;
     if (!resources[stealingPlayer] || !resources[targetPlayer]) {
         console.log("Failed to parse player...", stealingPlayer, targetPlayer, resources);
         return;
@@ -482,7 +466,7 @@ function parseStoleUnknownMessage(pElement, prevElement) {
     // for the player being stolen from, (-1) on all resources that are non-zero
     // for the player receiving, (+1) for all resources that are non-zero FOR THE OTHER PLAYER
     // record the unknown and wait for it to surface
-    theft = {
+    var theft = {
         who: {
             stealingPlayer,
             targetPlayer,
@@ -567,7 +551,7 @@ function reviewThefts() {
                 }
                 delete thefts[i].what[resourceType];
                 var remainingOptions = Object.keys(thefts[i].what);
-                if (remainingOptions === 1) {
+                if (remainingOptions.length === 1) {
                     transferResource(
                         thefts[i].who.targetPlayer, 
                         thefts[i].who.stealingPlayer, 
@@ -602,6 +586,9 @@ function parseLatestMessages() {
     var allMessages = getAllMessages();
     var newOffset = allMessages.length;
     var newMessages = allMessages.slice(MSG_OFFSET);
+    if (!newMessages.length) {
+        return;
+    }
     ALL_PARSERS.forEach(parser => newMessages.forEach((msg, idx) => {
         var prevMessage = idx > 0 ? newMessages[idx - 1] : allMessages[MSG_OFFSET - 1];
         parser(msg, prevMessage);
@@ -636,8 +623,8 @@ function recognizeUsers() {
     .filter(msg => msg.textContent.includes(placeInitialSettlementSnippet));
     console.log("total placement messages", placementMessages.length);
     for (var msg of placementMessages) {
-        msg_text = msg.textContent;
-        username = msg_text.replace(placeInitialSettlementSnippet, "").split(" ")[0];
+        var msg_text = msg.textContent;
+        var username = msg_text.replace(placeInitialSettlementSnippet, "").split(" ")[0];
         console.log(username);
         if (!resources[username]) {
             players.push(username);
